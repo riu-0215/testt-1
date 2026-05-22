@@ -18,6 +18,10 @@ GREEN = (0, 255, 0)
 # プレイヤーの設定
 player_rect = pygame.Rect(100, 500, 50, 50)
 player_speed = 5
+player_vel_y = 0  # 垂直方向の速度
+jump_power = -15  # ジャンプ力
+gravity = 0.8    # 重力
+is_jumping = False # ジャンプ中かどうかの判定
 
 # スクロール変数
 scroll_x = 0
@@ -37,6 +41,21 @@ while True:
         player_rect.x -= player_speed
     if keys[pygame.K_RIGHT]:
         player_rect.x += player_speed
+
+    # ジャンプ処理
+    if keys[pygame.K_SPACE] and not is_jumping:
+        player_vel_y = jump_power
+        is_jumping = True
+
+    # 重力の適用
+    player_vel_y += gravity
+    player_rect.y += player_vel_y
+
+    # 地面との当たり判定 (簡易版)
+    if player_rect.y >= 500:
+        player_rect.y = 500
+        player_vel_y = 0
+        is_jumping = False
 
     # 3. カメラの追従 (スクロール計算)
     # プレイヤーが画面の中央に来るようにスクロール値を調整
