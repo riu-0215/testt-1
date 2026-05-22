@@ -14,6 +14,10 @@ pygame.display.set_caption("横スクロールゲームの基本")
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
+SKY_BLUE = (135, 206, 235)
+MIDNIGHT_BLUE = (25, 25, 112)
+DARK_GREEN = (0, 100, 0)
+YELLOW = (255, 255, 0)
 
 # プレイヤーの設定
 player_rect = pygame.Rect(100, 500, 50, 50)
@@ -22,6 +26,7 @@ player_vel_y = 0  # 垂直方向の速度
 jump_power = -15  # ジャンプ力
 gravity = 0.8    # 重力
 is_jumping = False # ジャンプ中かどうかの判定
+is_night = False   # 夜かどうか
 
 # スクロール変数
 scroll_x = 0
@@ -34,6 +39,9 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_1:  # 1キーで昼夜切り替え
+                is_night = not is_night
 
     # 2. プレイヤーの移動
     keys = pygame.key.get_pressed()
@@ -62,12 +70,28 @@ while True:
     scroll_x += (player_rect.x - scroll_x - SCREEN_WIDTH // 2) / 10
 
     # 4. 描画
-    screen.fill(WHITE)
+    if is_night:
+        screen.fill(MIDNIGHT_BLUE)
+        # 月の描画 (白い円に背景色を重ねて三日月風にする)
+        pygame.draw.circle(screen, WHITE, (700, 80), 40)
+        pygame.draw.circle(screen, MIDNIGHT_BLUE, (720, 80), 35)
+    else:
+        screen.fill(SKY_BLUE)
+        # 太陽の描画
+        pygame.draw.circle(screen, YELLOW, (700, 80), 40)
+
+    # 雲の描画 (パララックス効果: スクロール速度を遅くして遠くに見せる)
+    for i in range(5):
+        cloud_x = (i * 400 - scroll_x * 0.3) % (SCREEN_WIDTH + 400) - 200
+        pygame.draw.circle(screen, WHITE, (int(cloud_x), 150), 30)
+        pygame.draw.circle(screen, WHITE, (int(cloud_x) + 30, 150), 40)
+        pygame.draw.circle(screen, WHITE, (int(cloud_x) + 60, 150), 30)
 
     # 地面の描画 (例としていくつも並べる)
-    for i in range(-10, 20):
+    for i in range(-20, 100):
+        ground_color = DARK_GREEN if is_night else GREEN
         # スクロール分だけ座標をずらして描画
-        pygame.draw.rect(screen, GREEN, (i * 100 - scroll_x, 550, 80, 50))
+        pygame.draw.rect(screen, ground_color, (i * 100 - scroll_x, 550, 101, 50))
 
     # プレイヤーの描画
     # プレイヤー自身の座標もスクロール分ずらす
