@@ -8,104 +8,9 @@ pygame.init()
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-<<<<<<< HEAD
-pygame.display.set_caption("横スクロールゲームの基本")
 
-# 色の定義
-WHITE = (255, 255, 255)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
-SKY_BLUE = (135, 206, 235)
-MIDNIGHT_BLUE = (25, 25, 112)
-DARK_GREEN = (0, 100, 0)
-YELLOW = (255, 255, 0)
 
-# プレイヤーの設定
-player_rect = pygame.Rect(100, 500, 50, 50)
-player_speed = 5
-player_vel_y = 0  # 垂直方向の速度
-jump_power = -15  # ジャンプ力
-gravity = 0.8    # 重力
-is_jumping = False # ジャンプ中かどうかの判定
-is_night = False   # 夜かどうか
-
-# スクロール変数
-scroll_x = 0
-
-clock = pygame.time.Clock()
-
-while True:
-    # 1. イベント処理
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_1:  # 1キーで昼夜切り替え
-                is_night = not is_night
-
-    # 2. プレイヤーの移動
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        player_rect.x -= player_speed
-    if keys[pygame.K_RIGHT]:
-        player_rect.x += player_speed
-
-    # ジャンプ処理
-    if keys[pygame.K_SPACE] and not is_jumping:
-        player_vel_y = jump_power
-        is_jumping = True
-
-    # 重力の適用
-    player_vel_y += gravity
-    player_rect.y += player_vel_y
-
-    # 地面との当たり判定 (簡易版)
-    if player_rect.y >= 500:
-        player_rect.y = 500
-        player_vel_y = 0
-        is_jumping = False
-
-    # 3. カメラの追従 (スクロール計算)
-    # プレイヤーが画面の中央に来るようにスクロール値を調整
-    scroll_x += (player_rect.x - scroll_x - SCREEN_WIDTH // 2) / 10
-
-    # 4. 描画
-    if is_night:
-        screen.fill(MIDNIGHT_BLUE)
-        # 月の描画 (白い円に背景色を重ねて三日月風にする)
-        pygame.draw.circle(screen, WHITE, (700, 80), 40)
-        pygame.draw.circle(screen, MIDNIGHT_BLUE, (720, 80), 35)
-    else:
-        screen.fill(SKY_BLUE)
-        # 太陽の描画
-        pygame.draw.circle(screen, YELLOW, (700, 80), 40)
-
-    # 雲の描画 (パララックス効果: スクロール速度を遅くして遠くに見せる)
-    for i in range(5):
-        cloud_x = (i * 400 - scroll_x * 0.3) % (SCREEN_WIDTH + 400) - 200
-        pygame.draw.circle(screen, WHITE, (int(cloud_x), 150), 30)
-        pygame.draw.circle(screen, WHITE, (int(cloud_x) + 30, 150), 40)
-        pygame.draw.circle(screen, WHITE, (int(cloud_x) + 60, 150), 30)
-
-    # 地面の描画 (例としていくつも並べる)
-    for i in range(-20, 100):
-        ground_color = DARK_GREEN if is_night else GREEN
-        # スクロール分だけ座標をずらして描画
-        pygame.draw.rect(screen, ground_color, (i * 100 - scroll_x, 550, 101, 50))
-
-    # プレイヤーの描画
-    # プレイヤー自身の座標もスクロール分ずらす
-    display_pos_x = player_rect.x - scroll_x
-    pygame.draw.rect(screen, BLUE, (display_pos_x, player_rect.y, player_rect.width, player_rect.height))
-
-    # 画面更新
-    pygame.display.flip()
-    
-    # フレームレート固定
-    clock.tick(60)
-=======
-pygame.display.set_caption("アクションゲーム試作 - [Space]:Jump [X]:Attack")
+pygame.display.set_caption("アクションゲーム試作 - [W/Space/↑]:Jump [X/Click]:Attack")
 
 # 色の定義
 WHITE = (255, 255, 255)
@@ -144,24 +49,25 @@ class Player:
 
     def update(self, platforms, enemies, projectiles):
         keys = pygame.key.get_pressed()
+        mouse_buttons = pygame.mouse.get_pressed()
         moving = False
         
-        if keys[pygame.K_LEFT]:
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.x -= self.speed
             moving = True
             self.facing_right = False
-        if keys[pygame.K_RIGHT]:
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.x += self.speed
             moving = True
             self.facing_right = True
 
         # ジャンプ処理
-        if keys[pygame.K_SPACE] and not self.is_jumping:
+        if (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]) and not self.is_jumping:
             self.vel_y = self.jump_power
             self.is_jumping = True
 
         # 攻撃処理
-        if keys[pygame.K_x] and self.attack_timer <= 0:
+        if (keys[pygame.K_x] or mouse_buttons[0]) and self.attack_timer <= 0:
             self.attack_timer = 15  # 15フレーム攻撃
 
         if moving:
@@ -558,33 +464,50 @@ class HiddenBoss(Boss):
         self.phase = "IDLE"
         self.phase_timer = 0
         self.particles = []
-        self.laser_x = 0
+        self.laser_y = 0
         self.summon_timer = 0
+        self.is_second_phase = False
+        self.safe_rect = pygame.Rect(0, 0, 0, 0)
 
-    def update(self, player_x, projectiles, platforms, enemies):
+    def update(self, player_x, player_y, projectiles, platforms, enemies):
         # 重力と衝突処理 (扇状攻撃中は浮遊)
         if self.phase != "FAN_ATTACK":
             self.vel_y += 0.8
             self.y += self.vel_y
+
+            # 足場との衝突判定を追加（高台に留まれるようにする）
+            foot_rect = pygame.Rect(self.x - 30, self.y + 45, 60, 5)
+            for plat in platforms:
+                if self.vel_y >= 0 and foot_rect.colliderect(plat):
+                    self.y = plat.top - 50
+                    self.vel_y = 0
+                    break
+
             if self.y > 500: self.y = 500; self.vel_y = 0
+
+        # 第二形態チェック
+        if self.health <= self.max_health // 2:
+            self.is_second_phase = True
 
         # 状態管理タイマー
         self.phase_timer += 1
         
         # フェーズ遷移
-        if self.phase == "IDLE" and self.phase_timer > 60:
-            self.phase = random.choice(["WARP", "LASER", "MELEE", "SUMMON", "FAN_ATTACK"])
+        idle_limit = 30 if self.is_second_phase else 60
+        if self.phase == "IDLE" and self.phase_timer > idle_limit:
+            self.phase = random.choice(["WARP", "LASER", "MELEE", "SUMMON", "FAN_ATTACK", "AIR_LASER"])
             self.phase_timer = 0
 
         if self.phase == "WARP":
             if self.phase_timer == 10:
-                self.x = random.choice([150, 400, 650])
-                self.y = 500
+                # 高台(3か所)または地上のいずれかにワープ
+                dest = random.choice([(175, 250), (625, 250), (400, 370), (400, 500)])
+                self.x, self.y = dest
             elif self.phase_timer > 30:
                 self.phase = "IDLE"; self.phase_timer = 0
 
         elif self.phase == "LASER":
-            if self.phase_timer == 1: self.laser_x = player_x
+            if self.phase_timer == 1: self.laser_y = player_y
             if self.phase_timer == 60: # レーザー発射
                 # プレイヤーがレーザー範囲内にいたらダメージ
                 self.phase = "LASER_FIRE"
@@ -594,13 +517,25 @@ class HiddenBoss(Boss):
             if self.phase_timer > 20:
                 self.phase = "IDLE"; self.phase_timer = 0
 
+        elif self.phase == "AIR_LASER":
+            if self.phase_timer == 1:
+                # 足場の中からランダムに安全地帯を選択
+                self.safe_rect = random.choice(platforms)
+            if self.phase_timer > 120: # 予告時間を延長 (80 -> 120)
+                self.phase = "AIR_LASER_FIRE"
+                self.phase_timer = 0
+        elif self.phase == "AIR_LASER_FIRE":
+            if self.phase_timer > 40:
+                self.phase = "IDLE"; self.phase_timer = 0
+
         elif self.phase == "MELEE":
             if self.phase_timer > 70:
                 self.phase = "IDLE"; self.phase_timer = 0
 
         elif self.phase == "SUMMON":
             if self.phase_timer == 10:
-                new_enemy = RangedEnemy(self.x + 100, self.y)
+                spawn_x = random.choice([50, SCREEN_WIDTH - 50])
+                new_enemy = Enemy(spawn_x, -50)
                 new_enemy.health = 1
                 enemies.append(new_enemy)
             if self.phase_timer > 40:
@@ -612,11 +547,11 @@ class HiddenBoss(Boss):
                 if self.y < 100: self.y = 100
             elif self.phase_timer % 10 == 0 and self.phase_timer < 100:
                 # 扇状に弾を発射 (下方向へ半円を描くように広げる)
-                num_bullets = 10
+                num_bullets = 10 
+                bullet_speed = 6
                 for i in range(num_bullets):
-                    # 0(右)からπ(左)まで、下向きの半円状に均等に発射
                     angle = (i / (num_bullets - 1)) * math.pi
-                    proj = Projectile(self.x, self.y, angle, color=PURPLE, speed=6)
+                    proj = Projectile(self.x, self.y, angle, color=PURPLE, speed=bullet_speed)
                     projectiles.append(proj)
             elif self.phase_timer >= 120:
                 self.phase = "IDLE"; self.phase_timer = 0
@@ -626,17 +561,22 @@ class HiddenBoss(Boss):
 
         # 影の粒子
         if len(self.particles) < 20:
-            self.particles.append([self.x + random.randint(-40, 40), self.y + random.randint(-60, 40), random.randint(2, 5)])
+            p_color = GLOW_RED if self.is_second_phase else DARK_PURPLE
+            self.particles.append([self.x + random.randint(-40, 40), self.y + random.randint(-60, 40), random.randint(2, 5), p_color])
         for p in self.particles[:]:
-            p[1] -= 2
+            speed = 4 if self.is_second_phase else 2
+            p[1] -= speed
             if p[1] < self.y - 150: self.particles.remove(p)
 
     def draw(self, surface):
-        for p in self.particles:
-            pygame.draw.circle(surface, DARK_PURPLE, (int(p[0]), int(p[1])), p[2])
+        for p in self.particles: # p[3] は色
+            pygame.draw.circle(surface, p[3], (int(p[0]), int(p[1])), p[2])
 
         dir_mod = 1 if self.facing_right else -1
-        body_color = BLACK if (pygame.time.get_ticks() // 200) % 2 == 0 else DARK_PURPLE
+        # 第二形態はより赤黒く点滅
+        flicker_speed = 100 if self.is_second_phase else 200
+        base_color = RED if self.is_second_phase and (pygame.time.get_ticks() // flicker_speed) % 2 == 0 else BLACK
+        body_color = base_color if (pygame.time.get_ticks() // flicker_speed) % 2 == 0 else DARK_PURPLE
         pygame.draw.rect(surface, body_color, (self.x - 35, self.y - 45, 70, 80), border_radius=15)
         pygame.draw.rect(surface, (20, 0, 40), (self.x - 25, self.y - 35, 50, 60), border_radius=10)
 
@@ -654,13 +594,42 @@ class HiddenBoss(Boss):
 
         # レーザー攻撃の描画
         if self.phase == "LASER":
-            # 赤い予測線
-            pygame.draw.line(surface, RED, (self.laser_x, 0), (self.laser_x, SCREEN_HEIGHT), 2)
+            # 横方向の赤い予測線
+            pygame.draw.line(surface, RED, (0, self.laser_y), (SCREEN_WIDTH, self.laser_y), 2)
         elif self.phase == "LASER_FIRE":
-            # 本発射
-            laser_rect = pygame.Rect(self.laser_x - 20, 0, 40, SCREEN_HEIGHT)
+            # 横方向の本発射
+            laser_rect = pygame.Rect(0, self.laser_y - 20, SCREEN_WIDTH, 40)
             pygame.draw.rect(surface, (200, 0, 255), laser_rect)
-            pygame.draw.rect(surface, WHITE, (self.laser_x - 5, 0, 10, SCREEN_HEIGHT))
+            pygame.draw.rect(surface, WHITE, (0, self.laser_y - 5, SCREEN_WIDTH, 10))
+
+        # 対空レーザー（接地していないと当たる攻撃）の描画
+        if self.phase == "AIR_LASER":
+            # 安全地帯の表示
+            pygame.draw.rect(surface, (0, 255, 0), (self.safe_rect.x - 5, self.safe_rect.y - 5, self.safe_rect.width + 10, self.safe_rect.height + 10), 3)
+            temp_font = pygame.font.SysFont("msgothic", 18, bold=True)
+            safe_label = temp_font.render("SAFE AREA", True, (0, 255, 0))
+            surface.blit(safe_label, (self.safe_rect.centerx - safe_label.get_width()//2, self.safe_rect.top - 25))
+
+            if (pygame.time.get_ticks() // 100) % 2 == 0:
+                # 安全地帯以外に薄い赤色の警告オーバーレイを表示
+                warning_overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                warning_overlay.fill((255, 0, 0, 64))
+                # 安全地帯をくり抜く
+                pygame.draw.rect(warning_overlay, (0, 0, 0, 0), self.safe_rect)
+                surface.blit(warning_overlay, (0,0))
+        elif self.phase == "AIR_LASER_FIRE":
+            # 安全地帯の表示（発動中も表示）
+            pygame.draw.rect(surface, (0, 255, 0), (self.safe_rect.x - 5, self.safe_rect.y - 5, self.safe_rect.width + 10, self.safe_rect.height + 10), 3)
+            # 空中に電撃のようなエフェクト (安全地帯を避けて描画)
+            for i in range(8):
+                y_pos = 50 + i * 60
+                # 左側から安全地帯まで
+                pygame.draw.line(surface, (0, 255, 255), (0, y_pos), (self.safe_rect.left, y_pos + 10), 2)
+                # 安全地帯の右側から右端まで
+                pygame.draw.line(surface, (0, 255, 255), (self.safe_rect.right, y_pos + 10), (SCREEN_WIDTH, y_pos + 20), 2)
+                # 安全地帯の上下にもエフェクトを出すが、足場の中央は通さない
+                if y_pos < self.safe_rect.top - 20 or y_pos > self.safe_rect.bottom + 20:
+                    pygame.draw.line(surface, (0, 255, 255), (self.safe_rect.left, y_pos + 10), (self.safe_rect.right, y_pos + 10), 2)
 
         # 周囲近接攻撃の描画
         if self.phase == "MELEE":
@@ -734,8 +703,12 @@ def setup_stage(stage_number):
     elif stage_number == 5:
         # ステージ5: 隠しボス戦 (体力が高い)
         enemies = [HiddenBoss(400, 450)]
-        # 隠しステージ用の特殊な足場
-        platforms.extend([pygame.Rect(100, 300, 150, 20), pygame.Rect(550, 300, 150, 20)])
+        # 隠しステージ用の特殊な足場 (中央にジャンプで届く台を追加)
+        platforms.extend([
+            pygame.Rect(100, 300, 150, 20), 
+            pygame.Rect(550, 300, 150, 20),
+            pygame.Rect(325, 420, 150, 20)
+        ])
     else:
         # ステージ3以降はランダムな足場と敵を生成
         num_platforms = random.randint(3, 6 + stage_number // 2) # ステージが進むにつれて足場が増える
@@ -796,10 +769,15 @@ def main():
                 enemy.update(player.x, projectiles, platforms) # platformsを渡す
             elif isinstance(enemy, Boss): # ボス
                 if isinstance(enemy, HiddenBoss):
-                    enemy.update(player.x, projectiles, platforms, enemies)
+                    enemy.update(player.x, player.y, projectiles, platforms, enemies)
                     # 隠しボスの攻撃当たり判定を個別にチェック
                     if enemy.phase == "LASER_FIRE":
-                        if abs(player.x - enemy.laser_x) < 30: player.take_damage()
+                        if abs(player.y - enemy.laser_y) < 40: player.take_damage()
+                    if enemy.phase == "AIR_LASER_FIRE" and enemy.phase_timer == 1:
+                        # 攻撃判定を発生の瞬間(1フレーム目)のみに制限して攻撃力を緩和
+                        foot_rect = pygame.Rect(player.x - 10, player.y + 30, 20, 10)
+                        if player.is_jumping or not foot_rect.colliderect(enemy.safe_rect):
+                            player.take_damage()
                     if enemy.phase == "MELEE" and enemy.phase_timer > 40:
                         dist = math.sqrt((player.x - enemy.x)**2 + (player.y - enemy.y)**2)
                         attack_timer = enemy.phase_timer - 40
@@ -821,7 +799,7 @@ def main():
             # 一番上の足場(550, 250)の上にポータルを配置
             portal_rect = pygame.Rect(610, 185, 30, 65)
             keys = pygame.key.get_pressed()
-            if player.rect.colliderect(portal_rect) and keys[pygame.K_UP]:
+            if player.rect.colliderect(portal_rect) and (keys[pygame.K_UP] or keys[pygame.K_w]):
                 current_stage = 5
                 enemies, platforms = setup_stage(current_stage)
                 projectiles.clear()
@@ -900,4 +878,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> RIU
