@@ -10,7 +10,7 @@ SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 
-pygame.display.set_caption("アクションゲーム試作 - [W/Space/↑]:Jump [X/Click]:Attack")
+pygame.display.set_caption("アクションゲーム試作 - [W/Space/↑]:Jump [X/Click]:Attack [C]:Parry")
 
 # 色の定義
 WHITE = (255, 255, 255)
@@ -27,6 +27,9 @@ PURPLE = (150, 0, 150) # 遠距離敵の色
 GOLD = (255, 215, 0) # ボスの色
 DARK_PURPLE = (40, 0, 80) # 隠しボスの色
 GLOW_RED = (255, 50, 50)  # 隠しボスの目の色
+CYAN = (0, 255, 255)
+YELLOW = (255, 240, 100)
+GREEN = (0, 200, 0)
 
 import random
 import math
@@ -43,32 +46,75 @@ class Player:
         self.walk_cycle = 0  # 歩行アニメーション用のカウンタ
         self.facing_right = True
         self.attack_timer = 0  # 攻撃モーションの持続時間
+        self.attack_power_timer = 0  # 攻撃強化時間
+        self.parry_timer = 0  # パリィ有効時間
+        self.parry_cooldown = 0  # パリィのクールダウン
+        self.ranged_cooldown = 0  # 遠距離攻撃のクールダウン
         self.health = 3        # プレイヤーの体力
+        self.max_health = 5
         self.invincible_timer = 0 # 被弾後の無敵時間
+        self.double_jump_available = True
+        self.jump_pressed = False
+        self.dash_timer = 0
+        self.dash_cooldown = 0
+        self.score = 0
         self.rect = pygame.Rect(self.x - 10, self.y - 47, 20, 82)
+        self.particles = []
 
-    def update(self, platforms, enemies, projectiles):
+    def update(self, platforms, enemies, projectiles, powerups):
         keys = pygame.key.get_pressed()
         mouse_buttons = pygame.mouse.get_pressed()
         moving = False
-        
+
+        # ダッシュ処理
+        if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] or keys[pygame.K_e]) and self.dash_cooldown <= 0:
+            self.dash_timer = 12
+            self.dash_cooldown = 90
+        if self.dash_timer > 0:
+            current_speed = self.speed + 4
+            self.dash_timer -= 1
+            self.invincible_timer = 1
+        else:
+            current_speed = self.speed
+        if self.dash_cooldown > 0:
+            self.dash_cooldown -= 1
+
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.x -= self.speed
+            self.x -= current_speed
             moving = True
             self.facing_right = False
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.x += self.speed
+            self.x += current_speed
             moving = True
             self.facing_right = True
 
         # ジャンプ処理
-        if (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]) and not self.is_jumping:
-            self.vel_y = self.jump_power
-            self.is_jumping = True
+        if (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]) and not self.jump_pressed:
+            if not self.is_jumping:
+                self.vel_y = self.jump_power
+                self.is_jumping = True
+            elif self.double_jump_available:
+                self.vel_y = self.jump_power
+                self.double_jump_available = False
+            self.jump_pressed = True
+        if not (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]):
+            self.jump_pressed = False
 
-        # 攻撃処理
+        # 攻撃処理 (左クリック or X)
         if (keys[pygame.K_x] or mouse_buttons[0]) and self.attack_timer <= 0:
             self.attack_timer = 15  # 15フレーム攻撃
+
+        # 遠距離攻撃 (Zキーのみ)
+        if keys[pygame.K_z] and self.ranged_cooldown <= 0:
+            self.ranged_cooldown = 18
+            mx, my = pygame.mouse.get_pos()
+            angle = math.atan2(my - self.y, mx - self.x)
+            projectiles.append(Projectile(self.x + (12 if self.facing_right else -12), self.y - 10, angle, color=CYAN, speed=10, friendly=True))
+
+        # パリィ (右クリック or C/CTRL)
+        if (keys[pygame.K_c] or keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL] or mouse_buttons[2]) and self.parry_timer <= 0 and self.parry_cooldown <= 0:
+            self.parry_timer = 14
+            self.parry_cooldown = 60
 
         if moving:
             self.walk_cycle += 0.15  # 移動中にアニメーションを進める
@@ -78,6 +124,20 @@ class Player:
         # 重力の適用
         self.vel_y += self.gravity
         self.y += self.vel_y
+
+        # 攻撃強化タイマーの更新
+        if self.attack_power_timer > 0:
+            self.attack_power_timer -= 1
+
+        # パリィタイマーの更新
+        if self.parry_timer > 0:
+            self.parry_timer -= 1
+        if self.parry_cooldown > 0:
+            self.parry_cooldown -= 1
+
+        # 遠距離攻撃のクールダウン
+        if self.ranged_cooldown > 0:
+            self.ranged_cooldown -= 1
 
         # 攻撃タイマーの更新
         if self.attack_timer > 0:
@@ -95,20 +155,43 @@ class Player:
         self.rect.x = self.x - 10
         self.rect.y = self.y - 47
 
+        # パワーアップとの当たり判定
+        for powerup in powerups[:]:
+            if self.rect.colliderect(powerup.rect):
+                self.collect_powerup(powerup)
+                powerups.remove(powerup)
+
         # 敵からの攻撃判定
         if self.invincible_timer <= 0:
             for enemy in enemies:
                 # 接近戦の敵(Enemy/Boss)の攻撃判定 (ボスは猶予を増やすため判定フレームを遅らせる)
-                hit_frame = 20 if isinstance(enemy, Enemy) else 10
+                if isinstance(enemy, HeavyEnemy):
+                    hit_frame = 35
+                    range_w = 130
+                    range_h = 60
+                elif isinstance(enemy, Enemy):
+                    hit_frame = 25
+                    range_w = 80
+                    range_h = 40
+                else:
+                    hit_frame = 10
+                    range_w = 80
+                    range_h = 60
                 if isinstance(enemy, (Enemy, Boss)) and enemy.attack_timer == hit_frame:
-                    range_w = 40 if isinstance(enemy, Enemy) else 80
-                    range_h = 30 if isinstance(enemy, Enemy) else 60
                     enemy_attack_rect = pygame.Rect(
                         enemy.x + (10 if enemy.facing_right else -(range_w + 10)),
                         enemy.y - 25, range_w, range_h
                     )
                     if self.rect.colliderect(enemy_attack_rect):
-                        self.take_damage()
+                        if self.parry_timer > 0:
+                            if isinstance(enemy, Enemy):
+                                enemy.health = 0
+                                enemy.attack_timer = 0
+                                self.score += 150
+                            self.parry_timer = 0
+                            self.parry_cooldown = 0
+                        else:
+                            self.take_damage()
                         break
                 
                 # ボスの地響き攻撃の判定 (地面に接地している場合のみダメージ)
@@ -118,6 +201,16 @@ class Player:
 
             # 飛び道具(Projectile)の当たり判定
             for proj in projectiles[:]:
+                if proj.friendly:
+                    continue
+                if self.parry_timer > 0 and self.rect.colliderect(proj.rect):
+                    proj.vel_x = -proj.vel_x
+                    proj.vel_y = -proj.vel_y
+                    proj.friendly = True
+                    proj.color = CYAN
+                    self.parry_timer = 0
+                    self.parry_cooldown = 0
+                    continue
                 if self.rect.colliderect(proj.rect):
                     self.take_damage()
                     projectiles.remove(proj)
@@ -125,15 +218,32 @@ class Player:
 
             # 攻撃の当たり判定 (攻撃開始の特定のフレームで判定)
             if self.attack_timer == 10:
+                attack_w = 60 if self.attack_power_timer > 0 else 40
                 attack_rect = pygame.Rect(
-                    self.x + (10 if self.facing_right else -50),
+                    self.x + (10 if self.facing_right else -attack_w),
                     self.y - 25,
-                    40,
+                    attack_w,
                     30
                 )
                 for enemy in enemies:
                     if attack_rect.colliderect(enemy.rect):
-                        enemy.health -= 1
+                        if isinstance(enemy, (Boss, HiddenBoss)):
+                            damage = 1
+                        else:
+                            damage = 2 if self.attack_power_timer > 0 else 1
+                        enemy.health -= damage
+                        if enemy.health <= 0:
+                            if isinstance(enemy, Enemy):
+                                self.score += 150
+                            elif isinstance(enemy, RangedEnemy):
+                                self.score += 200
+                            elif isinstance(enemy, Boss):
+                                self.score += 800
+                            elif isinstance(enemy, HiddenBoss):
+                                self.score += 1200
+                            if not isinstance(enemy, (Boss, HiddenBoss)) and random.random() < 0.35:
+                                kind = random.choice(["HEAL", "ATTACK", "SCORE"])
+                                powerups.append(PowerUp(enemy.x, enemy.y, kind))
 
         # 当たり判定 (地面とプラットフォーム)
         self.check_collision(platforms)
@@ -143,6 +253,14 @@ class Player:
         self.invincible_timer = 60  # 約1秒間の無敵時間
         # 被弾時に少し跳ね返る（ノックバック）
         self.vel_y = -10
+
+    def collect_powerup(self, powerup):
+        if powerup.kind == "HEAL":
+            self.health = min(self.max_health, self.health + 1)
+        elif powerup.kind == "ATTACK":
+            self.attack_power_timer = 180
+        elif powerup.kind == "SCORE":
+            self.score += 150
 
     def check_collision(self, platforms):
         # 足元（y座標）の判定用仮想Rect
@@ -156,6 +274,7 @@ class Player:
                     self.y = plat.top - 35
                     self.vel_y = 0
                     self.is_jumping = False
+                    self.double_jump_available = True
                     on_platform = True
                     break # 衝突したらループを抜ける
         # 地面との衝突はplatformsリスト内の地面Rectで処理されるため、個別のy > 500判定は不要
@@ -167,13 +286,19 @@ class Player:
 
         dir_mod = 1 if self.facing_right else -1
         swing = math.sin(self.walk_cycle) * 15
-        
+
         # 1. 脚 (左右交互に振る)
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x - 8 + swing, self.y + 35), 8)
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x + 8 - swing, self.y + 35), 8)
 
         # 2. 胴体
         pygame.draw.rect(surface, SHIRT, (self.x - 10, self.y - 20, 20, 30), border_radius=5)
+
+        # 追加エフェクト: ダッシュと攻撃強化
+        if self.dash_timer > 0:
+            pygame.draw.circle(surface, CYAN, (int(self.x), int(self.y - 20)), 18, 2)
+        if self.attack_power_timer > 0:
+            pygame.draw.circle(surface, YELLOW, (int(self.x), int(self.y - 20)), 22, 2)
 
         # 3. 腕 (攻撃中と歩行中でポーズを変える)
         if self.attack_timer > 0:
@@ -191,6 +316,10 @@ class Player:
         eye_x = self.x + (4 * dir_mod)
         pygame.draw.circle(surface, BLACK, (int(eye_x), int(self.y - 37)), 2)
         pygame.draw.circle(surface, BLACK, (int(eye_x + (4 * dir_mod)), int(self.y - 37)), 2)
+        if self.parry_timer > 0:
+            glow = pygame.Surface((44, 44), pygame.SRCALPHA)
+            pygame.draw.circle(glow, (0, 255, 255, 120), (22, 22), 20, 4)
+            surface.blit(glow, (int(self.x) - 22, int(self.y - 57)))
 
 class Enemy:
     def __init__(self, x, y):
@@ -203,7 +332,10 @@ class Enemy:
         self.attack_timer = 0 # New: for enemy attack animation
         self.facing_right = True # New: for enemy facing direction
         self.chase_speed = 1.5 # New: Speed for chasing the player
-        self.attack_range = 50 # New: Range to trigger attack
+        self.attack_range = 90 # New: Range to trigger attack
+        self.attack_windup = 45
+        self.attack_recovery = 30
+        self.attack_cooldown = 0
 
     def update(self, platforms, player_x): # platforms引数を追加, player_xを追加
         # 重力
@@ -227,10 +359,14 @@ class Enemy:
             self.y = SCREEN_HEIGHT - 65 - 35 # 535 - 35 = 500
             self.y = 500
             self.vel_y = 0
-        
+
         # 攻撃中でない場合のみプレイヤーを追いかける
         if self.attack_timer > 0:
             self.attack_timer -= 1
+            if self.attack_timer == 0:
+                self.attack_cooldown = self.attack_recovery
+        elif self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
         else:
             # プレイヤーを追いかけるAI
             if player_x < self.x - self.attack_range / 2: # プレイヤーが左にいて、攻撃範囲外
@@ -240,7 +376,7 @@ class Enemy:
                 self.x += self.chase_speed
                 self.facing_right = True
             else: # プレイヤーが攻撃範囲内
-                self.attack_timer = 30 # 攻撃モーションを開始
+                self.attack_timer = self.attack_windup # 攻撃モーションを開始
 
         # 画面外に出ないように制限 (左右の壁)
         if self.x < 10: self.x = 10
@@ -252,8 +388,7 @@ class Enemy:
 
     def draw(self, surface):
         dir_mod = 1 if self.facing_right else -1
-        
-        # 敵の描画 (赤色の人型)
+
         # 1. 脚
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x - 8, self.y + 35), 8)
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x + 8, self.y + 35), 8)
@@ -263,8 +398,19 @@ class Enemy:
 
         # 3. 腕 (攻撃中と通常でポーズを変える)
         if self.attack_timer > 0:
-            # 攻撃モーション: 前方に腕を突き出す
-            pygame.draw.line(surface, ENEMY_SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (30 * dir_mod), self.y - 5), 5)
+            if self.attack_timer > 30:
+                # 構え: 大きく振りかぶる
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (-4 * dir_mod), self.y - 18), (self.x + (-22 * dir_mod), self.y + 2), 6)
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (6 * dir_mod), self.y + 8), 5)
+            elif self.attack_timer > 15:
+                # 振り下ろし: 大きく前方へ振る
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (10 * dir_mod), self.y - 17), (self.x + (48 * dir_mod), self.y), 10)
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x - (6 * dir_mod), self.y - 15), (self.x - (14 * dir_mod), self.y + 6), 5)
+                pygame.draw.arc(surface, RED, (self.x + (10 * dir_mod) - (35 if dir_mod > 0 else 15), self.y - 25, 50, 45), math.radians(170 if dir_mod > 0 else 0), math.radians(220 if dir_mod > 0 else 180), 4)
+            else:
+                # フォローする腕
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (18 * dir_mod), self.y - 5), (self.x + (38 * dir_mod), self.y + 5), 7)
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x - 10, self.y - 15), (self.x - 18, self.y + 10), 5)
         else:
             # 通常の腕の位置
             pygame.draw.line(surface, ENEMY_SKIN, (self.x - 10, self.y - 15), (self.x - 18, self.y + 10), 5)
@@ -277,12 +423,64 @@ class Enemy:
         pygame.draw.circle(surface, BLACK, (int(eye_x), int(self.y - 37)), 2)
         pygame.draw.circle(surface, BLACK, (int(eye_x + (4 * dir_mod)), int(self.y - 37)), 2)
 
+class HeavyEnemy(Enemy):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.health = 4
+        self.chase_speed = 1.0
+        self.attack_range = 120
+        self.attack_windup = 80
+        self.attack_recovery = 40
+        self.rect = pygame.Rect(x - 15, y - 40, 30, 80)
+
+    def draw(self, surface):
+        dir_mod = 1 if self.facing_right else -1
+        # 大きな体
+        pygame.draw.line(surface, PANTS, (self.x, self.y + 15), (self.x - 10, self.y + 45), 10)
+        pygame.draw.line(surface, PANTS, (self.x, self.y + 15), (self.x + 10, self.y + 45), 10)
+        pygame.draw.rect(surface, ENEMY_SHIRT, (self.x - 15, self.y - 25, 30, 40), border_radius=8)
+
+        # 手元と剣の基準
+        hand_x = self.x + (8 * dir_mod)
+        hand_y = self.y - 14
+
+        # 腕と剣
+        if self.attack_timer > 0:
+            if self.attack_timer > 60:
+                # 最大振りかぶり: 剣を頭上に掲げる
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (-10 * dir_mod), self.y - 18), (self.x + (-36 * dir_mod), self.y + 8), 10)
+                pygame.draw.line(surface, ENEMY_SKIN, (hand_x, hand_y), (hand_x + (14 * dir_mod), hand_y - 24), 8)
+                pygame.draw.line(surface, SWORD_COLOR, (hand_x + (14 * dir_mod), hand_y - 24), (hand_x + (14 * dir_mod) + (24 * dir_mod), hand_y - 52), 6)
+            elif self.attack_timer > 30:
+                # 大振りの振り下ろし
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (68 * dir_mod), self.y + 16), 14)
+                pygame.draw.line(surface, SWORD_COLOR, (hand_x + (12 * dir_mod), hand_y - 18), (hand_x + (12 * dir_mod) + (52 * dir_mod), hand_y - 42), 7)
+                pygame.draw.arc(surface, RED, (self.x + (10 * dir_mod) - (45 if dir_mod > 0 else 25), self.y - 40, 80, 60), math.radians(160 if dir_mod > 0 else 0), math.radians(220 if dir_mod > 0 else 180), 5)
+            else:
+                # フォローする腕と剣
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x + (24 * dir_mod), self.y - 2), (self.x + (48 * dir_mod), self.y + 14), 8)
+                pygame.draw.line(surface, ENEMY_SKIN, (self.x - 12, self.y - 18), (self.x - 26, self.y + 10), 6)
+                pygame.draw.line(surface, SWORD_COLOR, (hand_x + (14 * dir_mod), hand_y - 24), (hand_x + (14 * dir_mod) + (36 * dir_mod), hand_y - 34), 6)
+        else:
+            # 構えなしの通常姿勢
+            pygame.draw.line(surface, ENEMY_SKIN, (self.x - 12, self.y - 18), (self.x - 24, self.y + 10), 7)
+            pygame.draw.line(surface, ENEMY_SKIN, (self.x + 12, self.y - 18), (self.x + 26, self.y + 10), 7)
+            pygame.draw.line(surface, SWORD_COLOR, (hand_x + (12 * dir_mod), hand_y - 18), (hand_x + (12 * dir_mod) + (20 * dir_mod), hand_y - 36), 4)
+
+        # 頭
+        pygame.draw.circle(surface, ENEMY_SKIN, (int(self.x), int(self.y - 40)), 14)
+        eye_x = self.x + (5 * dir_mod)
+        pygame.draw.circle(surface, BLACK, (int(eye_x), int(self.y - 42)), 3)
+        pygame.draw.circle(surface, BLACK, (int(eye_x + (5 * dir_mod)), int(self.y - 42)), 3)
+
 class Projectile:
-    def __init__(self, x, y, direction, color=BLACK, speed=7):
+    def __init__(self, x, y, direction, color=BLACK, speed=7, friendly=False):
         self.x = x
         self.y = y
         self.speed = speed
         self.color = color
+        self.friendly = friendly
+        self.friendly = friendly
         if isinstance(direction, float):
             self.vel_x = self.speed * math.cos(direction)
             self.vel_y = self.speed * math.sin(direction)
@@ -299,6 +497,33 @@ class Projectile:
 
     def draw(self, surface):
         pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), 5)
+
+class PowerUp:
+    def __init__(self, x, y, kind):
+        self.x = x
+        self.y = y
+        self.kind = kind
+        self.float_timer = random.random() * math.pi
+        self.rect = pygame.Rect(x - 12, y - 12, 24, 24)
+
+    def update(self):
+        self.float_timer += 0.05
+        self.y += math.sin(self.float_timer) * 0.4
+        self.rect.x = self.x - 12
+        self.rect.y = self.y - 12
+
+    def draw(self, surface):
+        if self.kind == "HEAL":
+            color = GREEN
+        elif self.kind == "ATTACK":
+            color = YELLOW
+        else:
+            color = CYAN
+        pygame.draw.circle(surface, color, (int(self.x), int(self.y)), 10)
+        pygame.draw.circle(surface, BLACK, (int(self.x), int(self.y)), 10, 2)
+        label = "H" if self.kind == "HEAL" else "A" if self.kind == "ATTACK" else "S"
+        font = pygame.font.SysFont("msgothic", 18, bold=True)
+        surface.blit(font.render(label, True, BLACK), (self.x - 6, self.y - 10))
 
 class RangedEnemy:
     def __init__(self, x, y):
@@ -369,7 +594,17 @@ class RangedEnemy:
         pygame.draw.rect(surface, (80, 0, 80), (self.x - 10, self.y - 20, 20, 30), border_radius=5)
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x - 8, self.y + 35), 8)
         pygame.draw.line(surface, PANTS, (self.x, self.y + 10), (self.x + 8, self.y + 35), 8)
-        pygame.draw.line(surface, SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (25 * dir_mod), self.y - 10), 5)
+
+        # 右腕: 射撃準備/発射差分
+        if self.shoot_timer > 80:
+            pygame.draw.line(surface, SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (20 * dir_mod), self.y - 25), 6)
+            pygame.draw.circle(surface, CYAN, (int(self.x + (24 * dir_mod)), int(self.y - 28)), 4)
+        else:
+            pygame.draw.line(surface, SKIN, (self.x + (10 * dir_mod), self.y - 15), (self.x + (25 * dir_mod), self.y - 10), 5)
+
+        # 左腕は待機姿勢
+        pygame.draw.line(surface, SKIN, (self.x - 10, self.y - 15), (self.x - 18, self.y + 10), 5)
+
         eye_x = self.x + (4 * dir_mod)
         pygame.draw.circle(surface, BLACK, (int(eye_x), int(self.y - 37)), 2)
 
@@ -686,7 +921,7 @@ def setup_stage(stage_number):
         ])
     elif stage_number == 2:
         # プレイヤーの初期位置(x=400)と重ならないように調整
-        enemies = [Enemy(150, 450), Enemy(300, 450), RangedEnemy(700, 450)]
+        enemies = [Enemy(150, 450), HeavyEnemy(300, 450)]
         platforms.extend([
             pygame.Rect(50, 480, 120, 20),
             pygame.Rect(250, 380, 120, 20),
@@ -726,7 +961,11 @@ def setup_stage(stage_number):
 
         # 敵の数をランダムに決定
         num_melee_enemies = random.randint(1 + stage_number // 3, 3 + stage_number // 2)
+        num_heavy_enemies = random.randint(0, max(0, stage_number // 3))
         num_ranged_enemies = random.randint(0 + stage_number // 4, 2 + stage_number // 3)
+        num_flying_enemies = random.randint(0, 1 + stage_number // 4)
+        if num_heavy_enemies > 0:
+            num_ranged_enemies = 0
 
         # 敵のスポーン位置（足場の上または地面）を収集
         valid_spawn_y = []
@@ -741,6 +980,8 @@ def setup_stage(stage_number):
 
         for _ in range(num_melee_enemies):
             enemies.append(Enemy(random.randint(50, SCREEN_WIDTH - 50), random.choice(valid_spawn_y)))
+        for _ in range(num_heavy_enemies):
+            enemies.append(HeavyEnemy(random.randint(50, SCREEN_WIDTH - 50), random.choice(valid_spawn_y)))
         for _ in range(num_ranged_enemies):
             enemies.append(RangedEnemy(random.randint(50, SCREEN_WIDTH - 50), random.choice(valid_spawn_y)))
     
@@ -750,8 +991,16 @@ def main():
     clock = pygame.time.Clock()
     player = Player()
     current_stage = 1
+    stage_names = {
+        1: "練習場",
+        2: "高台の戦い",
+        3: "激戦区",
+        4: "ボス戦",
+        5: "隠しボス"
+    }
     enemies, platforms = setup_stage(current_stage)
     projectiles = []
+    powerups = []
     font = pygame.font.SysFont("msgothic", 24) # 日本語対応フォント（Windows標準）
 
     while True:
@@ -760,8 +1009,11 @@ def main():
                 pygame.quit()
                 sys.exit()
 
-        player.update(platforms, enemies, projectiles)
+        player.update(platforms, enemies, projectiles, powerups)
         
+        for powerup in powerups:
+            powerup.update()
+
         for enemy in enemies:
             if isinstance(enemy, Enemy): # 近接敵
                 enemy.update(platforms, player.x) # platformsとplayer.xを渡す
@@ -790,6 +1042,29 @@ def main():
             # 画面外（上下左右）に出たら削除
             if proj.x < -50 or proj.x > SCREEN_WIDTH + 50 or proj.y < -50 or proj.y > SCREEN_HEIGHT + 50:
                 projectiles.remove(proj)
+                continue
+            if proj.friendly:
+                for enemy in enemies:
+                    if proj.rect.colliderect(enemy.rect):
+                        enemy.health -= 1
+                        if enemy.health <= 0:
+                            if isinstance(enemy, Enemy):
+                                player.score += 150
+                            elif isinstance(enemy, RangedEnemy):
+                                player.score += 200
+                            elif isinstance(enemy, Boss):
+                                player.score += 800
+                            elif isinstance(enemy, HiddenBoss):
+                                player.score += 1200
+                            if not isinstance(enemy, (Boss, HiddenBoss)) and random.random() < 0.35:
+                                kind = random.choice(["HEAL", "ATTACK", "SCORE"])
+                                powerups.append(PowerUp(enemy.x, enemy.y, kind))
+                        projectiles.remove(proj)
+                        break
+
+        for powerup in powerups[:]:
+            if powerup.y < -50 or powerup.y > SCREEN_HEIGHT + 50:
+                powerups.remove(powerup)
         
         # 体力がなくなった敵を削除
         enemies = [e for e in enemies if e.health > 0]
@@ -842,6 +1117,8 @@ def main():
 
         for proj in projectiles:
             proj.draw(screen)
+        for powerup in powerups:
+            powerup.draw(screen)
 
         player.draw(screen)
 
@@ -852,6 +1129,22 @@ def main():
             pygame.draw.circle(screen, RED, (hx - 7, hy), 8)
             pygame.draw.circle(screen, RED, (hx + 7, hy), 8)
             pygame.draw.polygon(screen, RED, [(hx - 15, hy + 3), (hx + 15, hy + 3), (hx, hy + 18)])
+        if player.health < player.max_health:
+            gray_count = player.max_health - player.health
+            for i in range(gray_count):
+                hx, hy = 30 + (player.health + i) * 35, 30
+                pygame.draw.circle(screen, (150, 150, 150), (hx - 7, hy), 8)
+                pygame.draw.circle(screen, (150, 150, 150), (hx + 7, hy), 8)
+                pygame.draw.polygon(screen, (150, 150, 150), [(hx - 15, hy + 3), (hx + 15, hy + 3), (hx, hy + 18)])
+
+        # スコアの表示
+        score_label = font.render(f"SCORE: {player.score}", True, BLACK)
+        screen.blit(score_label, (SCREEN_WIDTH - score_label.get_width() - 20, 20))
+
+        # ダッシュ残り時間とクールダウン
+        dash_color = CYAN if player.dash_cooldown == 0 else (150, 150, 150)
+        pygame.draw.rect(screen, dash_color, (SCREEN_WIDTH - 170, 55, 140 * (1 - min(player.dash_cooldown, 90) / 90), 12))
+        screen.blit(font.render("DASH", True, BLACK), (SCREEN_WIDTH - 220, 50))
 
         # ボスHPバーの表示 (上部中央)
         for enemy in enemies:
@@ -865,7 +1158,12 @@ def main():
                 screen.blit(font.render("BOSS", True, WHITE), (bx, by - 20))
 
         # ステージ情報をタイトルに表示
-        pygame.display.set_caption(f"Stage: {current_stage} | アクションゲーム試作")
+        stage_name = stage_names.get(current_stage, f"ステージ {current_stage}")
+        pygame.display.set_caption(f"{stage_name} | Stage: {current_stage} | SCORE: {player.score}")
+
+        # 画面上にステージ名を表示
+        stage_label = font.render(stage_name, True, BLACK)
+        screen.blit(stage_label, (SCREEN_WIDTH // 2 - stage_label.get_width() // 2, 10))
 
         pygame.display.flip()
         clock.tick(60)
